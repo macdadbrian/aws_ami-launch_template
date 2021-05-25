@@ -20,12 +20,13 @@ today_string = time.strftime('%Y-%m-%d.%H%M%S')
 
 print (today_string)
 
-ec2_client = boto3.client('ec2','{REGION}')
-ec2_resource = boto3.resource('ec2','{REGION}')
+ec2_client = boto3.client('ec2','us-east-1')
+ec2_autoscale = boto3.client('autoscaling','us-east-1')
+ec2_resource = boto3.resource('ec2','us-east-1')
 
 
 instances = ec2_resource.instances.filter(
-        Filters = [ {'Name' : 'tag:Name', 'Values' : [ '{INSTANCE_NAME_TAG}' ]},
+        Filters = [ {'Name' : 'tag:Name', 'Values' : [ 'ec2-name*' ]},
                     {'Name' : 'instance-state-name', 'Values' : [ 'running' ]}
          ]
     )
@@ -36,24 +37,22 @@ for instance in instances:
     ec2_list.append(instance.id)
 print (ec2_list)
 
-ec2_instance = random.choice(ec2_list)
-print (ec2_instance)
+gateway = random.choice(ec2_list)
+print (gateway)
 
 image = ec2_client.create_image(
-    InstanceId=ec2_instance,
-    Name="{AMI_TAG_NAME} " + today_string,
-    Description="{AMI_TAG_NAME} " + today_string,
+    InstanceId={ec2_name},
+    Name="{ec2_name} " + today_string,
+    Description="{ec2_name} " + today_string,
     NoReboot=True,
     DryRun=False)
 
 image_resource = ec2_resource.Image(
                                 image['ImageId'])
 
-image_resource.create_tags(Tags=[ { 'Key': 'Name', 'Value': '{AMI_TAG_NAME} ' + today_string },
-                                  { 'Key': 'Compliance', 'Value': 'HIPAA' },
-                                  { 'Key': 'Cost Center', 'Value': 'V2' },
-                                  { 'Key': 'env', 'Value': '{ENV}' },
-                                  { 'Key': 'Use', 'Value': '{USE}' }                                
+image_resource.create_tags(Tags=[ { 'Key': 'Name', 'Value': '{ec2_name} ' + today_string },
+                                  { 'Key': 'env', 'Value': 'production' },
+                                  { 'Key': 'Use', 'Value': '' }                                
                                 ])
 
 time.sleep( 30 )
@@ -69,26 +68,24 @@ for snap in block_devices:
     snapshot = ec2_resource.Snapshot(snapshot_id)
     print (snapshot)
     
-    ec2_client.create_tags(Resources=[snapshot_id,],Tags=[ { 'Key': 'Name', 'Value': '{AMI_TAG_NAME} ' + today_string },
-                                  { 'Key': 'Compliance', 'Value': 'HIPAA' },
-                                  { 'Key': 'env', 'Value': '{ENV}' },                        
-                                  { 'Key': 'Cost Center', 'Value': 'V2' },
-                                  { 'Key': 'Use', 'Value': '{USE}' }                                
+    ec2_client.create_tags(Resources=[snapshot_id,],Tags=[ { 'Key': 'Name', 'Value': '{ec2_name} ' + today_string },
+                                  { 'Key': 'env', 'Value': 'production' },                        
+                                  { 'Key': 'Use', 'Value': '' }                                
                                 ])
 
 
 ami_image_id = list(map(lambda i: i['ImageId'], ec2_client.describe_images(
-    Filters = [ {'Name' : 'tag:Name', 'Values' : [ '{AMI_TAG_NAME} ' + today_string ]},
+    Filters = [ {'Name' : 'tag:Name', 'Values' : [ '{ec2_name} ' + today_string ]},
   ] 
     )['Images']))
 
-aws_ami_image_id = (' ' .join(ami_image_id))
+ec2_ami_image_id = (' ' .join(ami_image_id))
 
-print (aws_ami_image_id)
+print (ec2_ami_image_id)
 
 describe_templates = ec2_client.describe_launch_templates(
     LaunchTemplateNames=[
-        '{LAUNCH_TEMPLATE_NAME}',
+        '{ec2_launch_template_name}',
     ],
 )
 
@@ -97,7 +94,7 @@ print (describe_templates)
 
 launch_template_id = describe_templates.get('LaunchTemplates')[0]['LaunchTemplateId']
 
-version_description = ('{AMI_TAG_NAME} ' + today_string)
+version_description = ('{ec2_launch_tmeplate_name} ' + today_string)
 
 
 update_launch_template = ec2_client.create_launch_template_version(
@@ -105,7 +102,7 @@ update_launch_template = ec2_client.create_launch_template_version(
     SourceVersion="$Latest",
     VersionDescription=version_description,
             LaunchTemplateData={
-                "ImageId": aws_ami_image_id
+                "ImageId": ec2_ami_image_id
             }
         )
 
@@ -124,11 +121,11 @@ print (modify_launch_template)
 
 
 ami_image_name = list(map(lambda i: i['Name'], ec2_client.describe_images(
-    Filters = [ {'Name' : 'tag:Name', 'Values' : [ '{AMI_TAG_NAME}*' ]},
+    Filters = [ {'Name' : 'tag:Name', 'Values' : [ '{ec2_name}*' ]},
   ] 
     )['Images']))
 
-celltrak_ami_image_name = (' ' .join(ami_image_name))
+ec2_ami_image_name = (' ' .join(ami_image_name))
 
 ami_image_list = []
 
@@ -153,9 +150,9 @@ if len(ami_image_list) > 3:
        ] 
     )['Images']))
     
-    aws_ami_purge = (' ' .join(result_ami_name))
+    ec2_ami_purge = (' ' .join(result_ami_name))
     
-    print (aws_ami_purge)
+    print (ec2_ami_purge)
 
     result_launch_template_version = ec2_client.describe_launch_template_versions(
         DryRun=False,
@@ -163,39 +160,39 @@ if len(ami_image_list) > 3:
         Filters=[
                  {
                     'Name': 'image-id',
-                    'Values': [aws_ami_purge]
+                    'Values': [ec2_ami_purge]
                  }
         ]
     )
 
     print (result_launch_template_version)
     
-    aws_launch_template_version = result_launch_template_version.get('LaunchTemplateVersions')[0]['VersionNumber']
+    ec2_launch_template_version = result_launch_template_version.get('LaunchTemplateVersions')[0]['VersionNumber']
     
-    print (aws_launch_template_version)
+    print (ec2_launch_template_version)
     
-    aws_purge_old_launch_template_version = ec2_client.delete_launch_template_versions(
+    ec2_purge_old_launch_template_version = ec2_client.delete_launch_template_versions(
        DryRun=False,
        LaunchTemplateId=launch_template_id,
        Versions=[
-                  str(aws_launch_template_version)
+                  str(ec2_launch_template_version)
      ] 
    )
     
-    print (aws_purge_old_launch_template_version)
+    print (ec2_purge_old_launch_template_version)
     
     
-    aws_deregister_ami = ec2_client.deregister_image(
-       ImageId=celltrak_ami_purge,
+    ec2_deregister_ami = ec2_client.deregister_image(
+       ImageId=ec2_ami_purge,
        DryRun=False
    )
     
-    print (aws_deregister_ami)
+    print (ec2_deregister_ami)
     
-    aws_ami_snapshots = ec2_client.describe_snapshots(Filters=[{'Name': 'tag:Name', 'Values': [ result_image ]}])
+    ec2_ami_snapshots = ec2_client.describe_snapshots(Filters=[{'Name': 'tag:Name', 'Values': [ result_image ]}])
     
     
-    for snapshot in aws_ami_snapshots['Snapshots']:
+    for snapshot in ec2_ami_snapshots['Snapshots']:
             delete_snapshots = (snapshot['SnapshotId'])
             print (delete_snapshots)
             
@@ -204,3 +201,18 @@ if len(ami_image_list) > 3:
                                                    DryRun=False)
             
             print (delete)
+
+time.sleep( 60 )
+
+autoscale_refresh = ec2_autoscale.start_instance_refresh(
+        AutoScalingGroupName='{ec2_autoscale_group_name}',
+        Strategy='Rolling',
+        Preferences={
+            'MinHealthyPercentage': 80,
+            'CheckpointPercentages': [20,100],
+            'CheckpointDelay': 100
+        }
+    )
+    
+    
+print (autoscale_refresh)
